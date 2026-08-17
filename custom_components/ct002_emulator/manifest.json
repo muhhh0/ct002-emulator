@@ -7,6 +7,7 @@
   "documentation": "",
   "integration_type": "device",
   "iot_class": "local_polling",
+  "logo": "logo.svg",
   "requirements": [],
   "version": "1.0.0"
 }
