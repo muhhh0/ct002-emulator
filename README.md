@@ -2,6 +2,9 @@
 
 A Home Assistant custom component that emulates a CT002 Smart Meter for Marstek storage devices (B2500, B2500D).
 
+> **Early Stage / Vibe Coded**
+> This project was developed with AI assistance ("vibe coding") and is in an early, experimental stage. It works for the author's specific setup but may lack edge-case handling, comprehensive error recovery, or production-grade robustness. Use at your own risk and please report issues.
+
 ## Features
 
 - Responds to battery polling requests on UDP port 12345
