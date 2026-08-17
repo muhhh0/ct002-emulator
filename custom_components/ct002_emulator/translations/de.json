@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CT002 Netz-Stromzaehler hinzufuegen",
+        "description": "Konfigurieren Sie einen CT002 Netz-Stromzaehler-Emulator zur Beantwortung von Batterie-Abfragen auf UDP-Port 12345.",
+        "data": {
+          "name": "Name",
+          "ct_mac_address": "CT MAC-Adresse (z.B. a020a6010203 oder A0:20:A6:01:02:03)",
+          "power_entity": "Leistungssensor-Entitaet"
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Ungueltige MAC: 12 Hex-Zeichen mit oder ohne Doppelpunkte.",
+      "unknown": "Unerwarteter Fehler."
+    },
+    "abort": {
+      "already_configured": "Dieses Geraet ist bereits konfiguriert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Optionen konfigurieren",
+        "data": {
+          "power_entity": "Leistungssensor-Entitaet"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_reported_power": {
+        "name": "Zuletzt gemeldete Leistung"
+      },
+      "last_packet_timestamp": {
+        "name": "Zeitstempel des letzten Pakets"
+      }
+    },
+    "binary_sensor": {
+      "server_active": {
+        "name": "Server aktiv"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "CT002 aktiviert"
+      }
+    }
+  }
+}

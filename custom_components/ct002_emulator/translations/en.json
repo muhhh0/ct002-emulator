@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add CT002 Grid Meter",
+        "description": "Configure a CT002 Grid Meter Emulator to respond to battery polling requests on UDP port 12345.",
+        "data": {
+          "name": "Name",
+          "ct_mac_address": "CT MAC Address (e.g. a020a6010203 or A0:20:A6:01:02:03)",
+          "power_entity": "Power Sensor Entity"
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Invalid MAC: 12 hex characters with or without colons.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure Options",
+        "data": {
+          "power_entity": "Power Sensor Entity"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_reported_power": {
+        "name": "Last Reported Power"
+      },
+      "last_packet_timestamp": {
+        "name": "Last Packet Timestamp"
+      }
+    },
+    "binary_sensor": {
+      "server_active": {
+        "name": "Server Active"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "CT002 Enabled"
+      }
+    }
+  }
+}
