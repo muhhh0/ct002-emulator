@@ -27,6 +27,34 @@ A Home Assistant custom component that emulates a CT002 Smart Meter for Marstek 
 1. Copy `custom_components/ct002_emulator/` to your Home Assistant `config/custom_components/` directory
 2. Restart Home Assistant
 
+## Marstek App Setup
+
+The emulated CT002 device must first be registered via [AstraMeter](https://github.com/tomquist/AstraMeter) so it appears in the Marstek app. This feature is not yet built into the integration — AstraMeter is currently required for the initial device registration. Once registered, switch to the CT002 Grid Meter Emulator integration and the B2500 will discover it automatically via UDP broadcast.
+
+## Network Configuration
+
+The B2500 battery discovers the CT002 meter via UDP broadcast on port 12345. No IP configuration is needed — the battery automatically finds the emulator on your network.
+
+### Docker / Podman
+
+Both approaches work:
+
+**Option A: Host network mode**
+
+```bash
+docker run --network host ...
+```
+
+**Option B: Port forwarding**
+
+```bash
+docker run -p 12345:12345/udp ...
+```
+
+### Home Assistant OS / Supervised
+
+No network configuration needed — the integration listens on all interfaces by default.
+
 ## Configuration
 
 1. Go to Settings -> Devices & Services -> Add Integration
