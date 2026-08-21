@@ -5,8 +5,45 @@
         "title": "Add CT002 Grid Meter",
         "description": "Configure a CT002 Grid Meter Emulator to respond to battery polling requests on UDP port 12345.",
         "data": {
-          "name": "Name",
-          "ct_mac_address": "CT MAC Address (e.g. a020a6010203 or A0:20:A6:01:02:03)",
+          "name": "Name"
+        }
+      },
+      "registration": {
+        "title": "Marstek Cloud Registration",
+        "description": "Choose how to set up the CT002 device identity.",
+        "data": {
+          "registration_mode": "Registration Mode"
+        }
+      },
+      "cloud_login": {
+        "title": "Marstek Cloud Login",
+        "description": "Enter your Marstek App account credentials.",
+        "data": {
+          "email": "Email (Marstek App Account)",
+          "password": "Password",
+          "server": "Server"
+        }
+      },
+      "select_device": {
+        "title": "Select CT002 Device",
+        "description": "Choose an existing CT002 device from your Marstek Cloud account."
+      },
+      "new_device": {
+        "title": "Register New CT002 Device",
+        "description": "A new CT002 device will be registered in your Marstek Cloud account."
+      },
+      "sensor": {
+        "title": "Power Sensor",
+        "description": "Select the power sensor entity to use for grid meter emulation.",
+        "data": {
+          "power_entity": "Power Sensor Entity"
+        }
+      },
+      "manual_mac": {
+        "title": "CT002 Device Configuration",
+        "description": "Configure the CT002 device identity manually.",
+        "data": {
+          "ct_mac_address": "CT MAC Address (optional, auto-generated if empty)",
           "power_entity": "Power Sensor Entity"
         }
       },
@@ -22,6 +59,9 @@
     },
     "error": {
       "invalid_mac": "Invalid MAC: 12 hex characters with or without colons.",
+      "invalid_credentials": "Wrong email or password.",
+      "marstek_error": "Marstek Cloud error: {marstek_detail}",
+      "no_devices_found": "No CT002 devices found in your Marstek Cloud account.",
       "unknown": "Unexpected error."
     },
     "abort": {

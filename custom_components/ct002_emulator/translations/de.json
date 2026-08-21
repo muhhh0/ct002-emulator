@@ -5,8 +5,45 @@
         "title": "CT002 Netz-Stromzaehler hinzufuegen",
         "description": "Konfigurieren Sie einen CT002 Netz-Stromzaehler-Emulator zur Beantwortung von Batterie-Abfragen auf UDP-Port 12345.",
         "data": {
-          "name": "Name",
-          "ct_mac_address": "CT MAC-Adresse (z.B. a020a6010203 oder A0:20:A6:01:02:03)",
+          "name": "Name"
+        }
+      },
+      "registration": {
+        "title": "Marstek Cloud-Registrierung",
+        "description": "Waehlen Sie wie das CT002-Geraet eingerichtet werden soll.",
+        "data": {
+          "registration_mode": "Registrierungsmodus"
+        }
+      },
+      "cloud_login": {
+        "title": "Marstek Cloud-Anmeldung",
+        "description": "Geben Sie Ihre Marstek App-Zugangsdaten ein.",
+        "data": {
+          "email": "E-Mail (Marstek App-Konto)",
+          "password": "Passwort",
+          "server": "Server"
+        }
+      },
+      "select_device": {
+        "title": "CT002-Geraet auswaehlen",
+        "description": "Waehlen Sie ein bestehendes CT002-Geraet aus Ihrem Marstek Cloud-Konto."
+      },
+      "new_device": {
+        "title": "Neues CT002-Geraet registrieren",
+        "description": "Ein neues CT002-Geraet wird in Ihrem Marstek Cloud-Konto registriert."
+      },
+      "sensor": {
+        "title": "Leistungssensor",
+        "description": "Waehlen Sie die Leistungssensor-Entitaet fuer die Netz-Stromzaehler-Emulation.",
+        "data": {
+          "power_entity": "Leistungssensor-Entitaet"
+        }
+      },
+      "manual_mac": {
+        "title": "CT002-Geraetekonfiguration",
+        "description": "Konfigurieren Sie die CT002-Geraeteidentitaet manuell.",
+        "data": {
+          "ct_mac_address": "CT MAC-Adresse (optional, wird automatisch generiert)",
           "power_entity": "Leistungssensor-Entitaet"
         }
       },
@@ -22,6 +59,9 @@
     },
     "error": {
       "invalid_mac": "Ungueltige MAC: 12 Hex-Zeichen mit oder ohne Doppelpunkte.",
+      "invalid_credentials": "Falsche E-Mail oder Passwort.",
+      "marstek_error": "Marstek Cloud-Fehler: {marstek_detail}",
+      "no_devices_found": "Keine CT002-Geraete in Ihrem Marstek Cloud-Konto gefunden.",
       "unknown": "Unerwarteter Fehler."
     },
     "abort": {

@@ -319,6 +319,7 @@ class CT002EmulatorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_reported_power": self.last_reported_power,
             "last_packet_timestamp": self.last_packet_timestamp,
             "server_active": self.server_active and self.enabled,
+            "ct_mac": self._ct_mac,
         }
 
     async def _handle_request(self, data: bytes, addr: tuple[str, int]) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -66,3 +67,12 @@ class CT002EmulatorRunningSensor(
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.get("server_active")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        if self.coordinator.data is None:
+            return {}
+        return {
+            "ct_mac": self.coordinator.data.get("ct_mac", ""),
+        }
