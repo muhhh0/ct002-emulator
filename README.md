@@ -13,6 +13,8 @@ A Home Assistant custom component that emulates a CT002 Smart Meter for Marstek 
 - Configurable CT MAC address (auto-generated if not specified)
 - Enable/disable switch per instance
 - Supports multiple CT002 instances (shared UDP server, MAC-based dispatch)
+- Built-in Marstek Cloud registration (no AstraMeter needed)
+- Server selection: EU / US
 
 ## Installation
 
@@ -29,7 +31,13 @@ A Home Assistant custom component that emulates a CT002 Smart Meter for Marstek 
 
 ## Marstek App Setup
 
-The emulated CT002 device must first be registered via [AstraMeter](https://github.com/tomquist/AstraMeter) so it appears in the Marstek app. This feature is not yet built into the integration — AstraMeter is currently required for the initial device registration. Once registered, switch to the CT002 Grid Meter Emulator integration and the B2500 will discover it automatically via UDP broadcast.
+The emulated CT002 device needs to be registered in the Marstek Cloud so the B2500 battery can discover it and the Marstek app can display it. This integration now handles registration directly.
+
+During setup, you can choose one of three registration modes:
+
+- **No cloud registration**: Skip cloud setup. You enter the CT MAC address manually. Useful for testing or if you handle registration separately.
+- **Use existing device**: Log in to your Marstek Cloud account and select an existing CT002 device from the list.
+- **Register new device**: Log in to your Marstek Cloud account. The integration creates a new CT002 device with a unique MAC address, verifies it was created, and uses it for emulation.
 
 ## Network Configuration
 
@@ -59,14 +67,30 @@ No network configuration needed — the integration listens on all interfaces by
 
 1. Go to Settings -> Devices & Services -> Add Integration
 2. Search for "CT002 Grid Meter Emulator"
-3. Configure:
-   - **Name**: Display name for this CT002 instance
-   - **CT MAC Address**: MAC address of the CT002 (auto-generated if left empty, format: `a020a6010203` or `A0:20:A6:01:02:03`)
-   - **Power Sensor Entity**: The sensor entity providing power values in watts
+3. Follow the setup steps:
 
-## Options
+**Step 1 — Name**: Display name for this CT002 instance.
 
-After setup, you can configure:
+**Step 2 — Registration Mode**:
+   - **No cloud registration** → Step 4
+   - **Use existing device** → Step 3
+   - **Register new device** → Step 3
+
+**Step 3 — Marstek Cloud Login** (only if registration mode is not "None"):
+   - **Email**: Your Marstek account email
+   - **Password**: Your Marstek account password (sent as MD5 hash)
+   - **Server**: EU (`eu.hamedata.com`) or US (`us.hamedata.com`)
+   - **Note**: Only the EU server has been tested so far. US server support is untested — please report results if you try it.
+   - For "Use existing device": select a CT002 device from the list
+   - For "Register new device": a new device is created automatically
+
+**Step 4 — Power Sensor Entity**: Select the sensor entity that provides grid power values in watts.
+
+## Reconfiguration
+
+After setup, you can reconfigure an existing entry (Settings -> Devices & Services -> CT002 Grid Meter Emulator -> Configure):
+- **Name**: Change the display name
+- **CT MAC Address**: Change the CT MAC address
 - **Power Sensor Entity**: Change the power source sensor
 
 ## Entities
@@ -97,6 +121,10 @@ pytest tests/test_coordinator.py -v
 ```bash
 pytest tests/test_live.py -v -m live
 ```
+
+## Acknowledgments
+
+This project builds on the work of [AstraMeter](https://github.com/tomquist/AstraMeter). The CT002/CT003 protocol documentation and much of the Marstek Cloud API reverse-engineering were derived from that project. Thank you to the AstraMeter contributors for making this possible.
 
 ## License
 
