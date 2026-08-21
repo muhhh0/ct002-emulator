@@ -97,16 +97,67 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> CT002EmulatorOptionsFlow:
         """Get the options flow for this handler."""
-        return CT002EmulatorOptionsFlow(config_entry)
+        return CT002EmulatorOptionsFlow()
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle reconfiguration of an existing entry."""
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            ct_mac = user_input.get(CONF_CT_MAC_ADDRESS, "").strip()
+            if ct_mac and not _is_valid_mac(ct_mac):
+                errors[CONF_CT_MAC_ADDRESS] = "invalid_mac"
+            else:
+                if not ct_mac:
+                    ct_mac = _generate_mac()
+                else:
+                    ct_mac = _normalize_mac(ct_mac)
+
+                new_data = {
+                    **entry.data,
+                    CONF_NAME: user_input.get(CONF_NAME, entry.data.get(CONF_NAME, DEFAULT_NAME)),
+                    CONF_CT_MAC_ADDRESS: ct_mac,
+                    CONF_POWER_ENTITY: user_input[CONF_POWER_ENTITY],
+                }
+
+                if ct_mac.lower() != entry.unique_id:
+                    await self.async_set_unique_id(ct_mac)
+                    self._abort_if_unique_id_configured()
+
+                self.hass.config_entries.async_update_entry(entry, data=new_data)
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reconfigure_successful")
+
+        current_name = entry.data.get(CONF_NAME, DEFAULT_NAME)
+        current_mac = entry.data.get(CONF_CT_MAC_ADDRESS, "")
+        current_power_entity = entry.data.get(CONF_POWER_ENTITY, "")
+
+        reconfigure_schema = vol.Schema(
+            {
+                vol.Optional(CONF_NAME, default=current_name): str,
+                vol.Optional(CONF_CT_MAC_ADDRESS, default=current_mac): str,
+                vol.Required(CONF_POWER_ENTITY, default=current_power_entity): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="power",
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=reconfigure_schema,
+            errors=errors,
+            description_placeholders={"name": current_name},
+        )
 
 
 class CT002EmulatorOptionsFlow(config_entries.OptionsFlow):
     """Handle options for CT002 Grid Meter Emulator."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        super().__init__(config_entry)
-        self._options = dict(config_entry.options)
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -115,10 +166,7 @@ class CT002EmulatorOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_power_entity = self._options.get(
-            CONF_POWER_ENTITY,
-            self.config_entry.data.get(CONF_POWER_ENTITY, ""),
-        )
+        current_power_entity = self.config_entry.data.get(CONF_POWER_ENTITY, "")
 
         options_schema = vol.Schema(
             {

@@ -9,6 +9,15 @@
           "ct_mac_address": "CT MAC-Adresse (z.B. a020a6010203 oder A0:20:A6:01:02:03)",
           "power_entity": "Leistungssensor-Entitaet"
         }
+      },
+      "reconfigure": {
+        "title": "CT002 Netz-Stromzaehler neu konfigurieren",
+        "description": "Einstellungen fuer **{name}** aktualisieren.",
+        "data": {
+          "name": "Name",
+          "ct_mac_address": "CT MAC-Adresse (z.B. a020a6010203 oder A0:20:A6:01:02:03)",
+          "power_entity": "Leistungssensor-Entitaet"
+        }
       }
     },
     "error": {
@@ -16,7 +25,8 @@
       "unknown": "Unerwarteter Fehler."
     },
     "abort": {
-      "already_configured": "Dieses Geraet ist bereits konfiguriert."
+      "already_configured": "Dieses Geraet ist bereits konfiguriert.",
+      "reconfigure_successful": "Konfiguration aktualisiert."
     }
   },
   "options": {

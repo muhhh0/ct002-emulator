@@ -9,6 +9,15 @@
           "ct_mac_address": "CT MAC Address (e.g. a020a6010203 or A0:20:A6:01:02:03)",
           "power_entity": "Power Sensor Entity"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure CT002 Grid Meter",
+        "description": "Update settings for **{name}**.",
+        "data": {
+          "name": "Name",
+          "ct_mac_address": "CT MAC Address (e.g. a020a6010203 or A0:20:A6:01:02:03)",
+          "power_entity": "Power Sensor Entity"
+        }
       }
     },
     "error": {
@@ -16,7 +25,8 @@
       "unknown": "Unexpected error."
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "reconfigure_successful": "Configuration updated."
     }
   },
   "options": {
