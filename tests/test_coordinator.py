@@ -34,8 +34,10 @@ from custom_components.ct002_emulator.const import (
 
 
 class _MockState:
-    def __init__(self, state: str) -> None:
+    def __init__(self, state: str, attributes: dict | None = None) -> None:
         self.state = state
+        if attributes is not None:
+            self.attributes = attributes
 
 
 class _MockCoordinator:
@@ -225,6 +227,24 @@ class TestGetPowerFromState:
     def test_invalid_string(self) -> None:
         assert _get_power_from_state(_MockState("abc")) == 0
 
+    def test_nan_and_infinity_return_zero(self) -> None:
+        assert _get_power_from_state(_MockState("nan")) == 0
+        assert _get_power_from_state(_MockState("inf")) == 0
+        assert _get_power_from_state(_MockState("-inf")) == 0
+
+    def test_kilowatts_converted_to_watts(self) -> None:
+        assert _get_power_from_state(_MockState("0.85", {"unit_of_measurement": "kW"})) == 850
+        assert _get_power_from_state(_MockState("-1.25", {"unit_of_measurement": "kW"})) == -1250
+        # 0.29 * 1000 is 289.99999999999994 in IEEE-754 float; must round to 290
+        assert _get_power_from_state(_MockState("0.29", {"unit_of_measurement": "kW"})) == 290
+
+    def test_milliwatts_and_megawatts_converted_to_watts(self) -> None:
+        assert _get_power_from_state(_MockState("2000", {"unit_of_measurement": "mW"})) == 2
+        assert _get_power_from_state(_MockState("1.5", {"unit_of_measurement": "MW"})) == 1500000
+
+    def test_watts_unit_unchanged(self) -> None:
+        assert _get_power_from_state(_MockState("420.9", {"unit_of_measurement": "W"})) == 420
+
 
 # ---------------------------------------------------------------------------
 # B. SharedUDPServer tests
@@ -337,6 +357,72 @@ class TestSharedUDPServerRegister:
 
         assert result is False
         assert server._transport is None
+        assert coord.ct_mac.lower() not in server._coordinators
+
+    async def test_unregister_old_coordinator_does_not_evict_replacement(self) -> None:
+        loop = asyncio.get_event_loop()
+        hass = _MockHass(loop)
+        server = _SharedUDPServer.get_instance(hass)
+        old_coord = _MockCoordinator("a020a6000001")
+        new_coord = _MockCoordinator("a020a6000001")
+
+        with patch.object(hass.loop, "create_datagram_endpoint", new_callable=AsyncMock) as mock_create:
+            mock_transport = MagicMock()
+            mock_create.return_value = (mock_transport, MagicMock())
+            await server.register(old_coord)
+            await server.register(new_coord)
+
+        server.unregister(old_coord)
+        assert server._coordinators["a020a6000001"] is new_coord
+        mock_transport.close.assert_not_called()
+        assert server._transport is mock_transport
+
+    async def test_connection_lost_resets_transport_and_deactivates_coordinators(self) -> None:
+        loop = asyncio.get_event_loop()
+        hass = _MockHass(loop)
+        server = _SharedUDPServer.get_instance(hass)
+        coord = _MockCoordinator("a020a6000001")
+        coord.server_active = True
+        coord._build_data = MagicMock(return_value={"server_active": False})
+
+        with patch.object(hass.loop, "create_datagram_endpoint", new_callable=AsyncMock) as mock_create:
+            mock_transport = MagicMock()
+            mock_create.return_value = (mock_transport, MagicMock())
+            await server.register(coord)
+
+        protocol = server._protocol
+        assert protocol is not None
+        protocol.connection_lost(OSError("UDP socket closed unexpectedly"))
+
+        assert server._transport is None
+        assert server._protocol is None
+        assert coord.server_active is False
+        assert server.sendto(b"test", ("127.0.0.1", 5000)) is False
+
+    async def test_immediate_reregister_after_unregister_with_real_udp_socket(self) -> None:
+        import socket
+
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.bind(("0.0.0.0", 0))
+        free_port = probe.getsockname()[1]
+        probe.close()
+
+        loop = asyncio.get_running_loop()
+        hass = _MockHass(loop)
+        server = _SharedUDPServer.get_instance(hass)
+        coord1 = _MockCoordinator("a020a6000001")
+        coord2 = _MockCoordinator("a020a6000001")
+
+        with patch("custom_components.ct002_emulator.coordinator.UDP_PORT", free_port):
+            try:
+                assert await server.register(coord1) is True
+                server.unregister(coord1)
+                assert await server.register(coord2) is True
+                assert server._transport is not None
+                assert server._coordinators["a020a6000001"] is coord2
+            finally:
+                server.unregister(coord2)
+                await asyncio.sleep(0.05)
 
 
 @pytest.mark.asyncio
@@ -552,6 +638,38 @@ class TestCoordinatorHandleRequest:
 
         assert idx2 == (idx1 + 1) % 256
 
+    async def test_sendto_failure_does_not_update_last_reported_power(self) -> None:
+        coord = _make_coordinator("a020a6000001")
+        coord._shared_server.sendto = MagicMock(return_value=False)
+
+        with patch.object(coord, "_get_power", return_value=750):
+            with patch.object(coord, "async_set_updated_data") as mock_update:
+                request = _build_payload(["HMG-50", "bat", "HME-4", "a020a6000001", "1", "0"])
+                await coord._handle_request(request, ("10.1.0.10", 5000))
+
+        assert coord.last_reported_power == 0
+        assert coord.last_packet_timestamp is None
+        mock_update.assert_not_called()
+
+    async def test_source_entity_changes_propagated_immediately_without_caching(self) -> None:
+        coord = _make_coordinator("a020a6000001")
+        request = _build_payload(["HMG-50", "bat", "HME-4", "a020a6000001", "1", "0"])
+
+        for state_obj, expected_watts in [
+            (_MockState("100", {"unit_of_measurement": "W"}), "100"),
+            (_MockState("-450", {"unit_of_measurement": "W"}), "-450"),
+            (_MockState("0.85", {"unit_of_measurement": "kW"}), "850"),
+        ]:
+            coord.hass.states.get = MagicMock(return_value=state_obj)
+            with patch.object(coord, "async_set_updated_data"):
+                await coord._handle_request(request, ("10.1.0.10", 5000))
+
+            response_data = coord._shared_server.sendto.call_args[0][0]
+            fields, error = _parse_request(response_data)
+            assert error is None
+            assert fields[4] == expected_watts
+            assert fields[7] == expected_watts
+
 
 class TestCoordinatorBuildResponse:
     def test_phase_b_c_zero(self) -> None:
@@ -586,6 +704,34 @@ class TestCoordinatorSetEnabled:
         with patch.object(coord, "async_set_updated_data"):
             coord.set_enabled(True)
         assert coord.enabled is True
+
+    def test_set_enabled_persists_to_config_entry(self) -> None:
+        coord = _make_coordinator("a020a6000001", enabled=True)
+        coord.hass.config_entries = MagicMock()
+        with patch.object(coord, "async_set_updated_data"):
+            coord.set_enabled(False)
+        coord.hass.config_entries.async_update_entry.assert_called_once_with(
+            coord.entry,
+            data={**coord.entry.data, "enabled": False},
+        )
+
+
+@pytest.mark.asyncio
+class TestUpdateListener:
+    async def test_update_listener_updates_entity_without_restarting_server(self) -> None:
+        from custom_components.ct002_emulator import _async_update_listener
+
+        coord = _make_coordinator("a020a6000001")
+        coord.async_stop = AsyncMock()
+        coord.async_start = AsyncMock()
+        coord.entry.runtime_data = coord
+        coord.entry.options = {"power_entity": "sensor.brand_new_power"}
+
+        await _async_update_listener(coord.hass, coord.entry)
+
+        assert coord._power_entity == "sensor.brand_new_power"
+        coord.async_stop.assert_not_awaited()
+        coord.async_start.assert_not_awaited()
 
 
 class TestCoordinatorBuildData:

@@ -32,11 +32,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options update."""
+    """Handle options update without restarting the shared UDP server."""
     coordinator: CT002EmulatorCoordinator = entry.runtime_data
     coordinator.update_options()
-    await coordinator.async_stop()
-    await coordinator.async_start()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

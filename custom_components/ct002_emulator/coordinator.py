@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
+import math
 import random
 from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_CT_MAC_ADDRESS,
     CONF_ENABLED,
+    CONF_NAME,
     CONF_POWER_ENTITY,
     CT_TYPE,
     DEFAULT_ENABLED,
@@ -29,17 +31,36 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_POWER_UNIT_TO_WATT: dict[str, float] = {
+    "mW": 1e-3,
+    "W": 1.0,
+    "kW": 1e3,
+    "MW": 1e6,
+    "GW": 1e9,
+    "TW": 1e12,
+}
+
 
 def _get_power_from_state(state: State | None) -> int:
-    """Safely extract power value from a HA state object."""
+    """Safely extract power value in watts from a HA state object."""
     if state is None:
         return 0
     if state.state in ("unknown", "unavailable", "None", ""):
         return 0
     try:
-        return int(float(state.state))
+        value = float(state.state)
     except (ValueError, TypeError):
         return 0
+    if not math.isfinite(value):
+        return 0
+
+    attributes = getattr(state, "attributes", None)
+    unit = attributes.get("unit_of_measurement") if isinstance(attributes, dict) else None
+    factor = _POWER_UNIT_TO_WATT.get(unit, 1.0) if isinstance(unit, str) else 1.0
+
+    if factor == 1.0:
+        return int(value)
+    return int(round(value * factor))
 
 
 def _generate_mac() -> str:
@@ -125,6 +146,7 @@ class _SharedUDPServer:
         self._hass = hass
         self._transport: asyncio.DatagramTransport | None = None
         self._protocol: _SharedUDPProtocol | None = None
+        self._closing_event: asyncio.Event | None = None
         self._coordinators: dict[str, CT002EmulatorCoordinator] = {}
         self._lock = asyncio.Lock()
 
@@ -139,38 +161,71 @@ class _SharedUDPServer:
         """Register a coordinator. Opens socket if first registration."""
         async with self._lock:
             mac = coordinator.ct_mac.lower()
+
+            if self._transport is None:
+                if self._closing_event is not None:
+                    closing_event = self._closing_event
+                    self._closing_event = None
+                    if not closing_event.is_set():
+                        try:
+                            await asyncio.wait_for(closing_event.wait(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            _LOGGER.warning(
+                                "Timed out waiting for previous UDP socket on port %s to close",
+                                UDP_PORT,
+                            )
+
+                max_attempts = 3
+                for attempt in range(max_attempts):
+                    try:
+                        protocol = _SharedUDPProtocol(self)
+                        transport, _ = await self._hass.loop.create_datagram_endpoint(
+                            lambda: protocol,
+                            local_addr=("0.0.0.0", UDP_PORT),
+                        )
+                        self._protocol = protocol
+                        self._transport = transport
+                        _LOGGER.info("Shared CT002 UDP server started on port %s", UDP_PORT)
+                        break
+                    except OSError as err:
+                        if err.errno == errno.EADDRINUSE and attempt < max_attempts - 1:
+                            await asyncio.sleep(0.1)
+                            continue
+                        _LOGGER.error(
+                            "Failed to start shared CT002 UDP server on port %s: %s",
+                            UDP_PORT,
+                            err,
+                        )
+                        return False
+
             self._coordinators[mac] = coordinator
-
-            if self._transport is not None:
-                return True
-
-            try:
-                self._protocol = _SharedUDPProtocol(self)
-                self._transport, _ = await self._hass.loop.create_datagram_endpoint(
-                    lambda: self._protocol,
-                    local_addr=("0.0.0.0", UDP_PORT),
-                )
-                _LOGGER.info("Shared CT002 UDP server started on port %s", UDP_PORT)
-                return True
-            except OSError as err:
-                _LOGGER.error("Failed to start shared CT002 UDP server on port %s: %s", UDP_PORT, err)
-                return False
+            return True
 
     def unregister(self, coordinator: CT002EmulatorCoordinator) -> None:
         """Unregister a coordinator. Closes socket if last registration."""
         mac = coordinator.ct_mac.lower()
-        self._coordinators.pop(mac, None)
+        if self._coordinators.get(mac) is coordinator:
+            del self._coordinators[mac]
 
         if not self._coordinators and self._transport is not None:
-            self._transport.close()
+            transport = self._transport
+            protocol = self._protocol
             self._transport = None
             self._protocol = None
+            if protocol is not None:
+                self._closing_event = protocol.closed
+            transport.close()
             _LOGGER.info("Shared CT002 UDP server stopped (no more coordinators)")
 
-    def sendto(self, data: bytes, addr: tuple[str, int]) -> None:
-        """Send a UDP datagram."""
-        if self._transport is not None:
-            self._transport.sendto(data, addr)
+    def sendto(self, data: bytes, addr: tuple[str, int]) -> bool:
+        """Send a UDP datagram. Returns True if sent, False if transport is inactive."""
+        if self._transport is None:
+            _LOGGER.warning(
+                "Cannot send CT002 UDP response to %s: transport not active", addr
+            )
+            return False
+        self._transport.sendto(data, addr)
+        return True
 
     def _dispatch(self, data: bytes, addr: tuple[str, int]) -> None:
         """Parse CT MAC from request and dispatch to matching coordinator."""
@@ -195,6 +250,7 @@ class _SharedUDPProtocol(asyncio.DatagramProtocol):
 
     def __init__(self, server: _SharedUDPServer) -> None:
         self._server = server
+        self.closed = asyncio.Event()
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         pass
@@ -206,8 +262,15 @@ class _SharedUDPProtocol(asyncio.DatagramProtocol):
         _LOGGER.warning("CT002 shared UDP error: %s", exc)
 
     def connection_lost(self, exc: Exception | None) -> None:
+        self.closed.set()
         if exc:
             _LOGGER.warning("CT002 shared UDP connection lost: %s", exc)
+        if self._server._protocol is self:
+            self._server._transport = None
+            self._server._protocol = None
+            for coordinator in list(self._server._coordinators.values()):
+                coordinator.server_active = False
+                coordinator.async_set_updated_data(coordinator._build_data())
 
 
 class CT002EmulatorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -222,8 +285,9 @@ class CT002EmulatorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.entry = entry
         self._name: str = entry.data[CONF_NAME]
         self._ct_mac: str = entry.data.get(CONF_CT_MAC_ADDRESS, "") or _generate_mac()
-        self._power_entity: str = entry.options.get(
-            CONF_POWER_ENTITY, entry.data.get(CONF_POWER_ENTITY, "")
+        self._power_entity: str = (
+            entry.options.get(CONF_POWER_ENTITY)
+            or entry.data.get(CONF_POWER_ENTITY, "")
         )
 
         self.enabled: bool = entry.data.get(CONF_ENABLED, DEFAULT_ENABLED)
@@ -236,6 +300,7 @@ class CT002EmulatorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{DOMAIN}_{self._name}",
             update_interval=None,
         )
@@ -252,19 +317,36 @@ class CT002EmulatorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def update_options(self) -> None:
         """Update settings from config entry options."""
-        self._power_entity = self.entry.options.get(
-            CONF_POWER_ENTITY, self.entry.data.get(CONF_POWER_ENTITY, "")
+        self._power_entity = (
+            self.entry.options.get(CONF_POWER_ENTITY)
+            or self.entry.data.get(CONF_POWER_ENTITY, "")
         )
 
     def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable the CT002 server."""
+        """Enable or disable the CT002 server and persist state in entry data."""
         self.enabled = enabled
+        config_entries = getattr(self.hass, "config_entries", None)
+        if config_entries is not None:
+            config_entries.async_update_entry(
+                self.entry,
+                data={**self.entry.data, CONF_ENABLED: enabled},
+            )
         self.async_set_updated_data(self._build_data())
         _LOGGER.info("CT002 server %s for %s", "enabled" if enabled else "disabled", self._name)
 
     def _get_power(self) -> int:
         """Read the power from the HA entity."""
         state: State | None = self.hass.states.get(self._power_entity)
+        if state is None:
+            _LOGGER.debug(
+                "Power entity '%s' not found; reporting 0W", self._power_entity
+            )
+        elif state.state in ("unknown", "unavailable", "None", ""):
+            _LOGGER.debug(
+                "Power entity '%s' state is '%s'; reporting 0W",
+                self._power_entity,
+                state.state,
+            )
         return _get_power_from_state(state)
 
     def _build_response(self, request_fields: list[str], power: int) -> bytes:
@@ -348,7 +430,8 @@ class CT002EmulatorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         power = self._get_power()
         response = self._build_response(fields, power)
 
-        self._shared_server.sendto(response, addr)
+        if not self._shared_server.sendto(response, addr):
+            return
         self.last_reported_power = power
         self.last_packet_timestamp = datetime.now(tz=timezone.utc)
         _LOGGER.debug(

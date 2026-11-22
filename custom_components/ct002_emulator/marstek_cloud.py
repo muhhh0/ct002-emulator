@@ -41,6 +41,9 @@ def _translate_message(code: Any, msg: Any) -> str:
     return msg_text
 
 
+_SENSITIVE_PARAMS = frozenset({"pwd", "token"})
+
+
 async def _http_get_json(
     session: aiohttp.ClientSession,
     url: str,
@@ -48,7 +51,10 @@ async def _http_get_json(
     headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Make an async GET request and return parsed JSON."""
-    _LOGGER.debug("API request: GET %s params=%s", url, params)
+    safe_params = {
+        k: ("***" if k in _SENSITIVE_PARAMS else v) for k, v in params.items()
+    }
+    _LOGGER.debug("API request: GET %s params=%s", url, safe_params)
     try:
         async with session.get(url, params=params, headers=headers, timeout=TIMEOUT) as resp:
             body = await resp.text()
@@ -172,7 +178,7 @@ async def async_register_device(
 
     resp = await _http_get_json(session, add_url, params, headers=headers)
     code = str(resp.get("code", ""))
-    _LOGGER.warning(
+    _LOGGER.debug(
         "Marstek add_device response: code=%s msg=%s", code, resp.get("msg")
     )
     if code not in ("1", "2"):
@@ -220,7 +226,7 @@ async def async_login_and_list_ct002(
     """Login and return list of CT002 devices from the Marstek Cloud."""
     _token, devices = await async_login(session, email, password, base_url)
     ct002 = filter_ct002_devices(devices)
-    _LOGGER.warning(
+    _LOGGER.debug(
         "Found %d CT002 devices in cloud: %s",
         len(ct002),
         [(d.get("devid"), d.get("name")) for d in ct002],
@@ -241,7 +247,7 @@ async def async_register_new_device(
 
     # Count devices before registration
     ct002_before = filter_ct002_devices(devices)
-    _LOGGER.warning(
+    _LOGGER.debug(
         "CT002 devices before registration: %d — %s",
         len(ct002_before),
         [(d.get("devid"), d.get("name")) for d in ct002_before],
@@ -249,16 +255,16 @@ async def async_register_new_device(
 
     # Generate unique MAC
     mac = _generate_unique_mac(devices)
-    _LOGGER.warning("Registering NEW CT002 in Marstek Cloud: %s (name=%s)", mac, name)
+    _LOGGER.info("Registering NEW CT002 in Marstek Cloud: %s (name=%s)", mac, name)
 
     # Register
     await async_register_device(session, email, token, mac, base_url, timezone, name)
 
     # Re-fetch and verify
-    _LOGGER.warning("Re-fetching device list to verify registration...")
+    _LOGGER.debug("Re-fetching device list to verify registration...")
     _, refreshed_devices = await async_login(session, email, password, base_url)
     ct002_after = filter_ct002_devices(refreshed_devices)
-    _LOGGER.warning(
+    _LOGGER.debug(
         "CT002 devices after registration: %d — %s",
         len(ct002_after),
         [(d.get("devid"), d.get("name")) for d in ct002_after],
@@ -267,7 +273,7 @@ async def async_register_new_device(
     # Verify: our new MAC should appear
     for d in ct002_after:
         if str(d.get("devid", "")).lower() == mac:
-            _LOGGER.warning("Device %s CONFIRMED in cloud (name=%s)", mac, d.get("name"))
+            _LOGGER.info("Device %s CONFIRMED in cloud (name=%s)", mac, d.get("name"))
             return mac
 
     _LOGGER.warning(

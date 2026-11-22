@@ -36,7 +36,6 @@ from .marstek_cloud import (
     InvalidCredentials,
     MarstekError,
     async_login,
-    async_login_and_list_ct002,
     async_register_new_device,
     filter_ct002_devices,
 )
@@ -60,12 +59,23 @@ def _generate_mac() -> str:
 
 def _is_valid_mac(mac: str) -> bool:
     """Validate MAC format: 12 hex chars (no colons) or XX:XX:XX:XX:XX:XX."""
-    return bool(re.match(r"^[0-9a-f]{12}$", mac) or re.match(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", mac))
+    return bool(
+        re.match(r"^[0-9A-Fa-f]{12}$", mac)
+        or re.match(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", mac)
+    )
 
 
 def _normalize_mac(mac: str) -> str:
     """Normalize MAC to 12 lowercase hex chars (no colons)."""
     return mac.replace(":", "").lower()
+
+
+def _get_current_power_entity(entry: config_entries.ConfigEntry) -> str:
+    """Return the active power entity, preferring options over data."""
+    return (
+        entry.options.get(CONF_POWER_ENTITY)
+        or entry.data.get(CONF_POWER_ENTITY, "")
+    )
 
 
 class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -177,6 +187,7 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle Marstek Cloud login (email, password, server)."""
         errors: dict[str, str] = {}
+        description_placeholders: dict[str, str] = {}
 
         if user_input is not None:
             self._cloud_email = user_input[CONF_EMAIL].strip()
@@ -200,7 +211,7 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors["base"] = "invalid_credentials"
                 except MarstekError as exc:
                     errors["base"] = "marstek_error"
-                    errors["marstek_detail"] = str(exc)
+                    description_placeholders["marstek_detail"] = str(exc)
                 else:
                     self._cloud_token = token
                     self._cloud_devices = devices
@@ -225,6 +236,7 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+            description_placeholders=description_placeholders or None,
         )
 
     async def async_step_select_device(
@@ -280,6 +292,7 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle registration of a new CT002 device in the cloud."""
         errors: dict[str, str] = {}
+        description_placeholders: dict[str, str] = {}
 
         base_url = MARSTEK_SERVERS[self._cloud_server]
         tz = self.hass.config.time_zone or "UTC"
@@ -299,7 +312,7 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "invalid_credentials"
         except MarstekError as exc:
             errors["base"] = "marstek_error"
-            errors["marstek_detail"] = str(exc)
+            description_placeholders["marstek_detail"] = str(exc)
         else:
             await self.async_set_unique_id(self._ct_mac)
             self._abort_if_unique_id_configured()
@@ -320,6 +333,7 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+            description_placeholders=description_placeholders or None,
         )
 
     async def async_step_sensor(
@@ -374,7 +388,7 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
 
         if user_input is not None:
-            ct_mac = user_input.get(CONF_CT_MAC_ADDRESS, "").strip()
+            ct_mac = (user_input.get(CONF_CT_MAC_ADDRESS) or "").strip()
             if ct_mac and not _is_valid_mac(ct_mac):
                 errors[CONF_CT_MAC_ADDRESS] = "invalid_mac"
             else:
@@ -383,30 +397,72 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     ct_mac = _normalize_mac(ct_mac)
 
+                new_name = (
+                    (user_input.get(CONF_NAME) or "").strip()
+                    or entry.data.get(CONF_NAME, DEFAULT_NAME)
+                )
                 new_data = {
                     **entry.data,
-                    CONF_NAME: user_input.get(CONF_NAME, entry.data.get(CONF_NAME, DEFAULT_NAME)),
+                    CONF_NAME: new_name,
                     CONF_CT_MAC_ADDRESS: ct_mac,
                     CONF_POWER_ENTITY: user_input[CONF_POWER_ENTITY],
                 }
+                new_options = {
+                    k: v
+                    for k, v in entry.options.items()
+                    if k != CONF_POWER_ENTITY
+                }
 
-                if ct_mac.lower() != entry.unique_id:
+                if ct_mac != (entry.unique_id or "").lower():
                     await self.async_set_unique_id(ct_mac)
                     self._abort_if_unique_id_configured()
 
-                self.hass.config_entries.async_update_entry(entry, data=new_data)
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    title=new_name,
+                    unique_id=ct_mac,
+                    data=new_data,
+                    options=new_options,
+                )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reconfigure_successful")
 
-        current_name = entry.data.get(CONF_NAME, DEFAULT_NAME)
-        current_mac = entry.data.get(CONF_CT_MAC_ADDRESS, "")
-        current_power_entity = entry.data.get(CONF_POWER_ENTITY, "")
+        current_name = (
+            user_input.get(CONF_NAME) or ""
+            if user_input is not None
+            else entry.data.get(CONF_NAME, DEFAULT_NAME)
+        )
+        current_mac = (
+            user_input.get(CONF_CT_MAC_ADDRESS) or ""
+            if user_input is not None
+            else entry.data.get(CONF_CT_MAC_ADDRESS, "")
+        )
+        current_power_entity = (
+            user_input.get(CONF_POWER_ENTITY) or ""
+            if user_input is not None
+            else _get_current_power_entity(entry)
+        )
+
+        power_entity_key = (
+            vol.Required(
+                CONF_POWER_ENTITY,
+                description={"suggested_value": current_power_entity},
+            )
+            if current_power_entity
+            else vol.Required(CONF_POWER_ENTITY)
+        )
 
         reconfigure_schema = vol.Schema(
             {
-                vol.Optional(CONF_NAME, default=current_name): str,
-                vol.Optional(CONF_CT_MAC_ADDRESS, default=current_mac): str,
-                vol.Required(CONF_POWER_ENTITY, default=current_power_entity): selector.EntitySelector(
+                vol.Optional(
+                    CONF_NAME,
+                    description={"suggested_value": current_name},
+                ): str,
+                vol.Optional(
+                    CONF_CT_MAC_ADDRESS,
+                    description={"suggested_value": current_mac},
+                ): str,
+                power_entity_key: selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
                         device_class="power",
@@ -419,7 +475,7 @@ class CT002EmulatorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=reconfigure_schema,
             errors=errors,
-            description_placeholders={"name": current_name},
+            description_placeholders={"name": entry.data.get(CONF_NAME, DEFAULT_NAME)},
         )
 
 
@@ -433,11 +489,19 @@ class CT002EmulatorOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_power_entity = self.config_entry.data.get(CONF_POWER_ENTITY, "")
+        current_power_entity = _get_current_power_entity(self.config_entry)
+        power_entity_key = (
+            vol.Required(
+                CONF_POWER_ENTITY,
+                description={"suggested_value": current_power_entity},
+            )
+            if current_power_entity
+            else vol.Required(CONF_POWER_ENTITY)
+        )
 
         options_schema = vol.Schema(
             {
-                vol.Required(CONF_POWER_ENTITY, default=current_power_entity): selector.EntitySelector(
+                power_entity_key: selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
                         device_class="power",

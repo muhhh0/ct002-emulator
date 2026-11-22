@@ -43,9 +43,10 @@ class FakeDataUpdateCoordinator:
     def __class_getitem__(cls, item):
         return cls
 
-    def __init__(self, hass, logger, *, name=None, update_interval=None):
+    def __init__(self, hass, logger, *, config_entry=None, name=None, update_interval=None):
         self.hass = hass
         self.logger = logger
+        self.config_entry = config_entry
         self.name = name
         self.update_interval = update_interval
         self.data = None
@@ -63,8 +64,64 @@ ha_uc.CoordinatorEntity = type("CoordinatorEntity", (), {
 # CONF_NAME
 ha_const.CONF_NAME = "name"
 
-# ConfigEntry
+# ConfigEntry / Flow base classes
+class _FakeFlow:
+    """Minimal base stub for Home Assistant ConfigFlow / OptionsFlow."""
+
+    def async_show_form(
+        self,
+        *,
+        step_id: str,
+        data_schema=None,
+        errors=None,
+        description_placeholders=None,
+    ):
+        return {
+            "type": "form",
+            "step_id": step_id,
+            "data_schema": data_schema,
+            "errors": errors or {},
+            "description_placeholders": description_placeholders,
+        }
+
+    def async_create_entry(self, *, title: str = "", data=None, options=None):
+        result = {"type": "create_entry", "title": title, "data": data}
+        if options is not None:
+            result["options"] = options
+        return result
+
+    def async_abort(self, *, reason: str, description_placeholders=None):
+        return {
+            "type": "abort",
+            "reason": reason,
+            "description_placeholders": description_placeholders,
+        }
+
+
+class _FakeConfigFlow(_FakeFlow):
+    """Minimal ConfigFlow stub supporting domain= keyword argument."""
+
+    def __init_subclass__(cls, domain=None, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls.DOMAIN = domain
+
+    async def async_set_unique_id(self, unique_id=None, *, raise_on_progress=True):
+        self._unique_id = unique_id
+        return None
+
+    def _abort_if_unique_id_configured(self, updates=None, reload_on_update=True):
+        return None
+
+
+class _FakeOptionsFlow(_FakeFlow):
+    """Minimal OptionsFlow stub."""
+
+    config_entry = None
+
+
 ha_cfg.ConfigEntry = type("ConfigEntry", (), {})
+ha_cfg.ConfigFlow = _FakeConfigFlow
+ha_cfg.OptionsFlow = _FakeOptionsFlow
 
 # HomeAssistant
 ha.HomeAssistant = type("HomeAssistant", (), {})
@@ -97,9 +154,30 @@ ha_entity.DeviceInfo = type("DeviceInfo", (), {"__init__": lambda self, **kw: No
 ha_entity_platform.AddEntitiesCallback = type("AddEntitiesCallback", (), {})
 
 # config_flow helpers
+class _SelectOptionDict(dict):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+
+class _SelectorBase:
+    def __init__(self, config=None, **kwargs):
+        self.config = config
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
 ha_core.callback = lambda func: func  # decorator passthrough
 _mock_mods["homeassistant.data_entry_flow"].FlowResult = type("FlowResult", (), {})
-_mock_mods["homeassistant.helpers"].selector = type("selector", (), {"SelectOptionDict": type("SelectOptionDict", (), {}), "SelectSelector": type("SelectSelector", (), {}), "SelectSelectorConfig": type("SelectSelectorConfig", (), {}), "SelectSelectorMode": type("SelectSelectorMode", (), {"DROPDOWN": "dropdown"})()})()
+ha_selector = _mock_mods["homeassistant.helpers.selector"]
+ha_selector.SelectOptionDict = _SelectOptionDict
+ha_selector.SelectSelector = _SelectorBase
+ha_selector.SelectSelectorConfig = _SelectorBase
+ha_selector.EntitySelector = _SelectorBase
+ha_selector.EntitySelectorConfig = _SelectorBase
+ha_selector.SelectSelectorMode = type(
+    "SelectSelectorMode", (), {"DROPDOWN": "dropdown", "LIST": "list"}
+)()
+ha_helpers.selector = ha_selector
 
 
 # ---------------------------------------------------------------------------
